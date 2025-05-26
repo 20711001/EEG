@@ -1,14 +1,15 @@
-import numpy as np
-import torch
-from Models import VeCNNNet
-from sklearn.metrics.pairwise import cosine_similarity
 import random
-import pymysql
-from pymysql import Error
 import zlib
+import numpy as np
+import pymysql
+import torch
+from pymysql import Error
+from sklearn.metrics.pairwise import cosine_similarity
+
+from Models import VeCNNNet
 
 """
-    主要模型还是DCNN模型,所以这个可以不管
+    项目主要模型是DCNN模型而不是ve_cnn模型,所以这个可以不管
 """
 
 """
@@ -32,6 +33,7 @@ def load_model(model_path, num_classes):
     model.eval()
     return model, device
 
+
 def preprocess_npz(npz_path, required_shape=(16, 80)):
     """
         加载NPZ文件中的EEG数据并对其进行预处理
@@ -50,6 +52,7 @@ def preprocess_npz(npz_path, required_shape=(16, 80)):
     # 数据预处理
     return preprocess_data(eeg_data)
 
+
 def preprocess_data(eeg_data):
     """
         对EEG数据进行预处理
@@ -59,6 +62,7 @@ def preprocess_data(eeg_data):
 
     # 添加batch和channel维度 -> (1, 1, 16, 80)
     return torch.tensor(eeg_data, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+
 
 def compre_feature(feature):
     """
@@ -70,6 +74,7 @@ def compre_feature(feature):
     compressed_data = zlib.compress(original_data)
 
     return compressed_data
+
 
 def decompre_feature(compre_data):
     """
@@ -163,7 +168,6 @@ class DatabaseManager:
         if not data:
             raise ValueError("插入数据不能为空")
 
-
         # 对data分割操作
         columns = ', '.join(data.keys())
         placeholders = ', '.join(['%s'] * len(data))
@@ -225,7 +229,7 @@ class DatabaseManager:
 class EEGProcessor:
     def __init__(self, model_path):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model, _ = load_model(model_path,num_classes=109)
+        self.model, _ = load_model(model_path, num_classes=109)
         self.templates = {}  # 格式: {user_id: [feature_vec1, feature_vec2,...]}
 
     def extract_features(self, npz_path):
@@ -253,6 +257,7 @@ class EEGProcessor:
 
 class EEGAuthSystem:
     """身份验证系统（整合层）"""
+
     def __init__(self, model_path):
         self.processor = EEGProcessor(model_path)
         self.db = DatabaseManager()
@@ -264,7 +269,7 @@ class EEGAuthSystem:
             feature = self.processor.extract_features(npz_path)
             feature = compre_feature(feature)
             # 将压缩后的特征数据存储到数据库
-            record_id = self.db.insert_data( # record_id代表插入的次数,一般不相干
+            record_id = self.db.insert_data(  # record_id代表插入的次数,一般不相干
                 table="user_info",
                 data={
                     "user": user_id,
@@ -315,7 +320,6 @@ class EEGAuthSystem:
                 print(f"处理用户 {info['user']} 时出错: {str(process_error)}")
                 continue
 
-
         if best_score >= threshold:
             return best_match
         else:
@@ -338,8 +342,6 @@ if __name__ == "__main__":
     else:
         print("注册失败!")
 
-
-
     """
         验证流程:1.输入处理npz文件;2.随机获取npz文件的几个(16,80)数组提取特征;3.获取数据库所有数据然后解压,转换;4.对比特征与数据库用户.
     """
@@ -349,4 +351,3 @@ if __name__ == "__main__":
     result = auth_system.verify(npz_file)
     # 打印验证结果
     print("验证结果:", result)
-

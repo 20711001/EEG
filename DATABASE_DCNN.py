@@ -1,22 +1,34 @@
-import numpy as np
-import torch
-from sklearn.metrics.pairwise import cosine_similarity
 import random
+import numpy as np
 import pymysql
+import torch
+from numpy.core.defchararray import equal
 from pymysql import Error
+from sklearn.metrics.pairwise import cosine_similarity
 from Model_3 import DCNN
+from IFCB import feature_to_bits,generate_Keys,inverse_fusion,localRank,permute_feature,sum_IFCB,serialize_feature,deserialize_feature,bits_to_feature
+from NegativeDatabase import EEGNegativeDatabase,Ent
+from scipy.stats import spearmanr
+import torch.nn.functional as F
+import torch.nn as nn
+from sklearn.preprocessing import LabelEncoder
+from typing import Tuple
+
 
 """
     该文件用于DCNN模型与数据库之间的交互,模型为models文件夹下的DCNN_16x80.pth,数据库连接本地数据库
 """
 
 
-def load_model_DCNN(model_path, num_classes):
+def load_model_DCNN(model_path : str, num_classes : int) -> Tuple[torch.nn.Module, torch.device]:
     """
         加载模型,并使用GPU设备
-        返回模型和GPU设备
+        :param model_path: 模型地址
+        :param num_classes: 模型分类数
+        :return: 返回模型和GPU设备
     """
-    model = DCNN(num_classes=num_classes)
+
+    model = DCNN(num_classes)
 
     # 安全加载模型权重
     model.load_state_dict(torch.load(model_path, map_location='cpu', weights_only=True))
@@ -27,40 +39,13 @@ def load_model_DCNN(model_path, num_classes):
     model.eval()
     return model, device
 
-def preprocess_data(eeg_data):
-    """
-        对EEG数据进行预处理,预处理为数据加维度,这样才能作为特征(或说密码)提取的对象
-    """
-    # 确保输入是(16, 80)的numpy数组
-    assert eeg_data.shape == (16, 80), f"需要(16,80)的输入，但得到{eeg_data.shape}"
 
-    return torch.tensor(eeg_data, dtype=torch.float32).unsqueeze(0)
-
-def preprocess_npz(npz_path, required_shape=(16, 80)):
-    """
-        加载NPZ文件中的EEG数据并对其进行预处理
-        返回可以被特征提取(batch_size, 16, 80)的形状的数据
-    """
-    # 加载NPZ文件
-    data = np.load(npz_path)
-
-    # 获取EEG片段
-    valid_keys = [k for k in data.files if data[k].shape == required_shape]
-    if not valid_keys:
-        raise ValueError(f"NPZ文件中没有形状为{required_shape}的数据")
-
-    # 取一个固定值,后续考虑随机
-    eeg_data = data[valid_keys[0]]  # 取第一个符合条件的片段
-
-    # 数据预处理
-    return preprocess_data(eeg_data)
 
 class DatabaseManager:
     """
         主要做数据库方面的操作,一些普适性的操作
     """
     def __init__(self):
-
         """
         这里是数据库配置参数,更改参数可以连接其他数据库,这里的配置是连接我本人本地的数据库
         """
@@ -88,7 +73,6 @@ class DatabaseManager:
         except Error as e:
             print(f"数据库连接失败: {e}")
             raise
-
 
     def execute_query(self, query_sql, params=None):
         """
@@ -121,7 +105,6 @@ class DatabaseManager:
         if not data:
             raise ValueError("插入数据不能为空")
 
-
         # 对data分割操作
         columns = ', '.join(data.keys())
         placeholders = ', '.join(['%s'] * len(data))
@@ -134,12 +117,9 @@ class DatabaseManager:
             with self.connection.cursor() as cursor:
                 cursor.execute(sql, tuple(data.values()))
 
-
                 self.connection.commit()
 
-
                 last_id = cursor.lastrowid
-
 
                 print(f"数据插入成功，ID: {last_id}")
                 return last_id
@@ -215,34 +195,36 @@ class EEGProcessor_DCNN:
         主要是模型与数据之间的操作
     """
     def __init__(self, model_path):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model, _ = load_model_DCNN(model_path,num_classes=109)
+        self.model, self.device = load_model_DCNN(model_path, num_classes=109)
         self.templates = {}  # 格式: {user_id: [feature_vec1, feature_vec2,...]}
 
     def extract_features(self, npz_path):
         """
-            从npz文件提取特征,默认提取五个特征
+        从NPZ文件中随机提取一个EEG片段的特征,返回的是PyTorch CUDA张量
         """
         data = np.load(npz_path)
-        features = []
+
+        # 获取所有有效的EEG片段key（形状为16x80）
         available_keys = [k for k in data.files if data[k].shape == (16, 80)]
+        if not available_keys:
+            raise ValueError(f"NPZ文件中没有形状为(16, 80)的EEG数据: {npz_path}")
 
+        # 随机选择一个片段
+        selected_key = random.choice(available_keys)
+        eeg = data[selected_key]  # 形状 (16, 80)
 
-        for key in random.sample(available_keys, 5):
-            try:
-                eeg = data[key]
-                tensor = torch.from_numpy(eeg).float().to(self.device).unsqueeze(0)
+        eeg_tensor = torch.from_numpy(eeg.astype(np.float32)).unsqueeze(0).to(self.device)  # (1,16,80)
 
+        try:
+            # 提取特征
+            with torch.no_grad():
+                features = self.model.extract_features(eeg_tensor)  # 形状 (1, 64)
 
-                with torch.no_grad():
-                    feature = self.model.extract_features(tensor).cpu().numpy()[0]
-                    features.append(feature)
-            except Exception as e:
-                print(f"处理片段 {key} 时出错: {str(e)}")
+            return features
 
-        if not features:
-            raise ValueError(f"未找到有效EEG片段: {npz_path}")
-        return np.mean(features, axis=0)
+        except Exception as e:
+            print(f"处理片段 {selected_key} 时出错: {str(e)}")
+            raise
 
 
 class EEGAuthSystem_DCNN:
@@ -252,20 +234,22 @@ class EEGAuthSystem_DCNN:
     def __init__(self, model_path):
         self.processor = EEGProcessor_DCNN(model_path)
         self.db = DatabaseManager()
+        self.neg_db = EEGNegativeDatabase()
 
     def register_user(self, user_id, npz_path):
-        """完整的用户注册流程"""
+        """用户注册流程,原始模板,后续应用加密算法"""
         try:
             # 提取特征数据
             feature = self.processor.extract_features(npz_path)
 
-
             # 将压缩后的特征数据存储到数据库
-            record_id = self.db.insert_data( # record_id代表插入的次数,一般不相干
-                table="user_info_2",
+            record_id = self.db.insert_data(  # record_id代表插入的次数,一般不相干
+                table="user_info",
                 data={
                     "user": user_id,
-                    "pwd": feature.tobytes()
+                    "pwd": feature,
+                    "type": 0
+
                 }
             )
 
@@ -273,7 +257,6 @@ class EEGAuthSystem_DCNN:
                 "status": "success",
                 "user_id": user_id,
             }
-
 
         except Exception as e:
             return {
@@ -289,28 +272,36 @@ class EEGAuthSystem_DCNN:
             注意:这里传入的是npz文件而不是eeg文件,需要更正,暂且将名字改掉,然后固定输入npz文件的第一个数组用于验证,后续考虑随机输入的更改
         """
 
-        features = self.processor.extract_features(npz_path).squeeze()
+        feature = self.processor.extract_features(npz_path).squeeze(0)
 
-        # 查询用户
+        # 2. 查询数据库获取所有用户特征
         user_info = self.db.execute_query(
             "SELECT user, pwd FROM user_info_2"
         )
-        if not user_info:
 
+        if not user_info:
             return "数据库中没有数据!"
 
-        best_match, best_score = None, -1
+        # 3. 寻找最佳匹配
+        best_match = None
+        best_score = -1
+
+
         for info in user_info:
             try:
-                feature = np.frombuffer(info['pwd'], dtype=np.float32)
+                # 从数据库读取存储的特征
+                db_feature = np.frombuffer(info['pwd'], dtype=np.float32)
 
-                # 计算相似度得分
-                score = cosine_similarity([features], [feature])[0][0]
+                # 计算余弦相似度
+                score = cosine_similarity([feature], [db_feature])[0][0]
+
+                # 更新最佳匹配
                 if score > best_score:
-                    best_score, best_match = score, info['user']
+                    best_score = score
+                    best_match = info['user']
 
-            except Exception as process_error:
-                print(f"处理用户 {info['user']} 时出错: {str(process_error)}")
+            except Exception as e:
+                print(f"处理用户 {info['user']} 时出错: {str(e)}")
                 continue
 
 
@@ -320,55 +311,204 @@ class EEGAuthSystem_DCNN:
             return "Unknown"
 
 
-if __name__ == "__main__":
 
-    # 初始化系统
-    auth_system = EEGAuthSystem_DCNN(
-        model_path="models/DCNN_16x80.pth",
+    def register_user_negdb(self, user_id, npz_path):
+        """应用了负数据的用户注册流程"""
+        try:
+            # 提取特征数据
+            feature = self.processor.extract_features(npz_path)
+
+            # 转为二进制文件,并保存原始形状,好后续再从数据库读取转回特征数据形式
+            binary_feature, original_shape, original_dtype = feature_to_bits(feature)
+            str_zero, str_one = self.neg_db.create_negative_string(binary_feature)
+
+            # 将压缩后的特征数据存储到数据库
+            record_id_0 = self.db.insert_data(  # record_id_0代表插入的次数,一般不相干(插入次数代表总插入次数)
+                table="user_info_2",
+                data={
+                    "user": user_id,
+                    "pwd": str_zero,
+                    "type":0
+
+                }
+            )
+
+            record_id_1 = self.db.insert_data(  # record_id_1代表插入的次数,一般不相干
+                table="user_info_2",
+                data={
+                    "user": user_id,
+                    "pwd": str_one,
+                    "type": 1
+
+                }
+            )
+
+
+            return {
+                "status": "success",
+                "user_id": user_id,
+                "digital_info" : [original_shape, original_dtype]
+            }
+
+
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": str(e)
+            }
+
+    def verify_neg_db(self, user_id, npz_path):
+        """
+            用于登录界面:用户输入id,检索数据库中id对应密码,比较海明距离验证是否是本人;置信度为0.40,可更改
+
+            暂时返回score,即海明距离
+            若成功,返回用户名称(id);失败返回"unknown"
+        """
+
+        # 输入的特征
+        input_feature = self.processor.extract_features(npz_path)
+        binary_data = feature_to_bits(input_feature)
+
+        # 根据 user_id 和 type
+        # type为 0 即 0 的统计次数
+        user_info_0 = self.db.execute_query(
+            "SELECT pwd FROM user_info_2 WHERE user = %s AND type = 0",
+            (user_id,)
+        )
+        # type为 1 即为 1 的统计次数
+        user_info_1 = self.db.execute_query(
+            "SELECT pwd FROM user_info_2 WHERE user = %s AND type = 1",
+            (user_id,)
+        )
+
+        if not user_info_0:
+            return "数据库中没有找到关于0的统计文本!"
+        if not user_info_1:
+            return "数据库中没有找到关于1的统计文本!"
+
+        string_zero, string_one = user_info_0[0]['pwd'], user_info_1[0]['pwd']
+
+        zero_cnt, one_cnt = self.neg_db.GetBinaryArray(string_zero, string_one)
+        bit_probs = self.neg_db.estimate_original(zero_cnt, one_cnt)
+        binary_pred = ['1' if prob < 0.5 else '0' for prob in bit_probs]
+        binary_str = ''.join(map(str, binary_pred))
+
+        pre_feature = bits_to_feature(binary_str)
+        pre_feature = pre_feature.to(self.processor.model.fc.weight.device)
+        logits = self.processor.model.fc(pre_feature)
+        probs = F.softmax(logits, dim=1)
+        pred_class = torch.argmax(probs).item()
+
+        verify_user = f"user_{pred_class:03d}"
+
+        valid = equal(user_id, verify_user)
+
+        if valid:
+            return "登录成功"
+        else:
+            return "登录失败"
+
+    def register_user_IFCB(self, user_id, npz_path, keys):
+        """完整的用户注册流程"""
+        try:
+            # 提取特征数据
+            feature = self.processor.extract_features(npz_path)
+
+            pwd = sum_IFCB(feature, keys)
+            pwd = serialize_feature(pwd)
+
+            # 将压缩后的特征数据存储到数据库
+            record_id = self.db.insert_data(  # record_id代表插入的次数,一般不相干
+                table="user_info_3",
+                data={
+                    "user": user_id,
+                    "pwd": pwd
+                }
+            )
+
+            return {
+                "status": "success",
+                "user_id": user_id,
+            }
+
+
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": str(e)
+            }
+
+
+def verify_IFCB(self, user_id, npz_path, keys, threshold=0.40, ):
+    """
+        用于登录界面:用户输入id,检索数据库中id对应密码,比较海明距离验证是否是本人;置信度为0.40,可更改
+
+        暂时返回score,即海明距离
+        若成功,返回用户名称(id);失败返回"unknown"
+    """
+
+    feature = self.processor.extract_features(npz_path)
+    binary_data = feature_to_bits(feature)
+    binary_data = sum_IFCB(binary_data, keys)
+
+    # 根据 user_id 和 type 查询用户的密码
+    user_info = self.db.execute_query(
+        "SELECT pwd FROM user_info_3 WHERE user = %s",
+        (user_id,)
     )
 
+    if not user_info:
+        return "数据库中没有找到文本!"
 
-    # 连接数据库
-    auth_system.db.connect()
+    pwd = user_info[0]['pwd']
+    pwd = deserialize_feature(pwd)
 
+    print(binary_data)
 
-    """
-        第一步,注册用户,执行完后注释掉
-    """
-    # # 注册新用户
-    # result_1 = auth_system.register_user("user_001", "16_channels_seg/S001R07.npz")
-    # if result_1["status"] == "success":
-    #     print(f"注册成功，ID: {result_1['user_id']}")
+    print(pwd)
+
+    score, _ = spearmanr(binary_data[0], pwd[0])
+
+    # if score <= threshold:
+    #     return "验证成功"
     # else:
-    #     print("注册失败!")
-    #
-    # result_2 = auth_system.register_user("user_002", "16_channels_seg/S002R07.npz")
-    # if result_2["status"] == "success":
-    #     print(f"注册成功，ID: {result_2['user_id']}")
-    # else:
-    #     print("注册失败!")
-    #
-    # result_3 = auth_system.register_user("user_003", "16_channels_seg/S003R07.npz")
-    # if result_3["status"] == "success":
-    #     print(f"注册成功，ID: {result_3['user_id']}")
-    # else:
-    #     print("注册失败!")
+    #     return "Unknown"
+    return score
 
 
+def main():
+    try:
+        model_path = "models/DCNN_16x80.pth"
+        auth_system = EEGAuthSystem_DCNN(model_path)
+
+        # 连接数据库
+        auth_system.db.connect()
+
+        """
+            第一步,注册用户,执行完后注释掉
+        """
+        result = auth_system.register_user_negdb("user_001", "16_channels_seg/S001R07.npz")
+
+        if result["status"] == "success":
+            print(f"注册成功，ID: {result['user_id']}")
+        else:
+            print("注册失败!")
+
+        """
+            第二步,验证用户
+
+            验证流程:1.输入处理npz文件;2.获取npz文件的数组提取一个特征;3.对比特征与数据库用户.
+        """
+        npz_file = f"16_channels_seg/S003R02.npz"
+
+        result = auth_system.verify_neg_db('user_001', npz_file)
+        print(result)
 
 
-    """
-        第二步,验证用户
-        
-        验证流程:1.输入处理npz文件;2.随机获取npz文件的几个(16,80)数组提取特征;3.对比特征与数据库用户.
-    """
-    # 验证用户
-    npz_file = f"16_channels_seg/S003R02.npz"
-
-    result = auth_system.verify(npz_file)
-    # 打印验证结果
-    print("验证结果:", result)
+    except Exception as e:
+        return f"程序运行失败: {e}"
 
 
-
+if __name__ == "__main__":
+    main()
 

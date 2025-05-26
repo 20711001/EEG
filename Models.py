@@ -1,16 +1,17 @@
+import os
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import os
-import numpy as np
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
-from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from torch.utils.data import DataLoader
+from torch.utils.data import Dataset
 
 """
-    这个模型的输入为16*80,是在通道减少到16的前提使用
+    这个模型的输入为16*80,是在脑电波文件数据通道减少到16的前提下使用
 """
+
 
 class VeCNNNet(nn.Module):
     def __init__(self, input_channels=1, num_classes=109):
@@ -112,7 +113,7 @@ def train_model():
     train_loader = DataLoader(
         SignalDataset(X_train, y_train),
         batch_size=32,
-        shuffle=True # 随机打乱数据,训练集数据打乱防止模型学习到不相干的时间序列关系
+        shuffle=True  # 随机打乱数据,训练集数据打乱防止模型学习到不相干的时间序列关系
     )
     test_loader = DataLoader(
         SignalDataset(X_test, y_test),

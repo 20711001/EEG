@@ -1,14 +1,12 @@
 import mne
-import matplotlib.pyplot as plt
 import numpy as np
-import os
+import matplotlib as plt
 import pyedflib
-
+import os
 
 """
-    初步了解edf文件,了解脑电波数据
+    此文件用于初步了解edf文件,了解脑电波数据
 """
-
 
 
 # 加载edf文件
@@ -25,6 +23,7 @@ def load_edf_file(filepath):
         print(f"加载EDF文件时出错: {e}")
         return None
 
+
 # 滤波,1-45hz的滤波
 def edf_file_filter(raw):
     """
@@ -39,11 +38,12 @@ def edf_file_filter(raw):
         return None
     try:
         filtered_raw = raw.copy()
-        filtered_raw.filter(l_freq=1.0, h_freq=45.0, method = 'fir', fir_window='hamming')
+        filtered_raw.filter(l_freq=1.0, h_freq=45.0, method='fir', fir_window='hamming')
         return filtered_raw
     except Exception as e:
         print(f"滤波处理EDF文件时出错: {e}")
         return None
+
 
 # 减少通道数,从64减到16
 def decrease_channels(raw):
@@ -72,6 +72,7 @@ def decrease_channels(raw):
         print(f"滤波处理EDF文件时出错: {e}")
         return None
 
+
 # 保存函数
 def save_processed_data(raw, output_path):
     """
@@ -88,6 +89,7 @@ def save_processed_data(raw, output_path):
 
     except Exception as e:
         raise RuntimeError(f"保存失败: {str(e)}")
+
 
 # 绘制脑电波数据图
 def edf_file_plot(raw):
@@ -107,6 +109,7 @@ def edf_file_plot(raw):
     except Exception as e:
         print(f"绘制数据plot图像出错: {e}")
 
+
 # 绘制功率谱密度图
 def edf_file_plot_psd(raw):
     """
@@ -121,10 +124,13 @@ def edf_file_plot_psd(raw):
     except Exception as e:
         print(f"绘制数据psd_plot图像出错: {e}")
 
+
 # 将数据分为总时长60s的分段
 def segment_edf_one_eeg(edf_path, segment_length=0.5, sample_rate=160):
     """
     提取0-60秒内的数据并按固定时长分段
+
+    用于R001和R002数据,这两个实验项目为一分钟
 
     参数:
         edf_path: 输入EDF文件路径
@@ -141,17 +147,16 @@ def segment_edf_one_eeg(edf_path, segment_length=0.5, sample_rate=160):
             # 获取所有通道信息
             channel_names = f.getSignalLabels()
             n_channels = f.signals_in_file
-            total_samples = f.getNSamples()[0] # 值为9760
+            total_samples = f.getNSamples()[0]  # 值为9760
 
             # 计算0-60秒对应的采样点范围
             target_duration = 60  # 秒
-            max_samples = int(target_duration * sample_rate) # 值为9600
+            max_samples = int(target_duration * sample_rate)  # 值为9600
 
             # 读取0-60秒数据
             eeg_data = np.zeros((n_channels, max_samples))
             for i in range(n_channels):
                 eeg_data[i] = f.readSignal(i, 0, max_samples)
-
 
             # 计算分段参数
             points_per_segment = int(segment_length * sample_rate)
@@ -181,6 +186,8 @@ def segment_edf_two_eeg(edf_path, segment_length=0.5, sample_rate=160):
     """
     提取0-120秒内的数据并按固定时长分段
 
+    用于R003~R014数据,这些实验项目为两分钟
+
     参数:
         edf_path: 输入EDF文件路径
         segment_length: 分段时长(秒)，默认0.5秒
@@ -200,13 +207,12 @@ def segment_edf_two_eeg(edf_path, segment_length=0.5, sample_rate=160):
 
             # 计算0-120秒对应的采样点范围
             target_duration = 120  # 120秒
-            max_samples = int(target_duration * sample_rate) # 值为9600*2
+            max_samples = int(target_duration * sample_rate)  # 值为9600*2
 
             # 读取0-120秒数据
             eeg_data = np.zeros((n_channels, max_samples))
             for i in range(n_channels):
                 eeg_data[i] = f.readSignal(i, 0, max_samples)
-
 
             # 计算分段参数
             points_per_segment = int(segment_length * sample_rate)
@@ -231,11 +237,12 @@ def segment_edf_two_eeg(edf_path, segment_length=0.5, sample_rate=160):
         return None, None
 
 
-
 # 将数据分为120s的分段,采样率自动检测文件中所给的采样率,而不是取一个恒定值
 def segment_edf_eeg(edf_path, segment_length=0.5):
     """
     提取0-120秒内的数据并按固定时长分段
+
+    S88和S92这两个的数据存在128hz的采样率,与之前的函数不符
 
     参数:
         edf_path: 输入EDF文件路径
@@ -257,13 +264,12 @@ def segment_edf_eeg(edf_path, segment_length=0.5):
             sample_rate = f.getSampleFrequency(0)
             # 计算0-120秒对应的采样点范围
             target_duration = 120  # 120秒
-            max_samples = int(target_duration * sample_rate) # 值为9600*2
+            max_samples = int(target_duration * sample_rate)  # 值为9600*2
 
             # 读取0-120秒数据
             eeg_data = np.zeros((n_channels, max_samples))
             for i in range(n_channels):
                 eeg_data[i] = f.readSignal(i, 0, max_samples)
-
 
             # 计算分段参数
             points_per_segment = int(segment_length * sample_rate)
@@ -286,7 +292,6 @@ def segment_edf_eeg(edf_path, segment_length=0.5):
     except Exception as e:
         print(f"分割EDF文件出错: {str(e)}")
         return None, None
-
 
 
 # 按照文件本身时长进行0.5s的分割
@@ -309,7 +314,6 @@ def segment_edf_all_eeg(edf_path, segment_length=0.5, sample_rate=160):
             for i in range(n_channels):
                 eeg_data[i] = f.readSignal(i, 0, max_samples)
 
-
             # 计算分段参数
             points_per_segment = int(segment_length * sample_rate)
             if points_per_segment <= 0:
@@ -331,7 +335,6 @@ def segment_edf_all_eeg(edf_path, segment_length=0.5, sample_rate=160):
     except Exception as e:
         print(f"分割EDF文件出错: {str(e)}")
         return None, None
-
 
 
 # 主程序
@@ -379,7 +382,7 @@ if __name__ == "__main__":
     # # 1hz-45hz的滤波处理
     # processed_data= edf_file_filter(raw_data)
     # print(processed_data.info)
-
+    #
     # # 保存第一个滤波处理的文件
     # save_processed_data(processed_data, output_file)
     #
@@ -441,9 +444,6 @@ if __name__ == "__main__":
     #         # 保存
     #         save_processed_data(processed_data, output_file)
 
-
-
-
     """
       4.将每个通道的数据进行数据分割,按0.5s的指定时长进行切割
       序号88,92,100的EEG数据出现问题,无法分割3-14的EDF文件(采样率的问题,这三者的采样率不为恒定的160hz,改用检测采样率后问题解决)
@@ -456,12 +456,8 @@ if __name__ == "__main__":
     # print(subjects)
     # subjects = ["S092"]
     # subjects = ["S001", "S002", "S003", "S004", "S005"]
-
-
-
-
-
-    # 处理EDF文件并保存分段数据
+    #
+    # # 处理EDF文件并保存分段数据
     # try:
     #     data_seg, channels = segment_edf_two_eeg(edf_path)
     #     np.savez(os.path.join(output_dir, f"{subject}R{run:02d}.npz"), *data_seg)
@@ -494,26 +490,24 @@ if __name__ == "__main__":
     #         except Exception as e:
     #             print(f"处理失败 {edf_path}: {str(e)}")
 
-
-    # 验证分割结果是否正确
-    # 注意:在一个实验者中,R01和R02时长为1min,其余均为2min,故函数切割的调用需注意
-    edf_file = "./16_channels/S001/S001R01.edf"
-    data_seg, channels = segment_edf_one_eeg(edf_file)
-
-    npz_file= "./16_channels_seg/S001R01.npz"
-    data = np.load(npz_file)
-    features = []
-    a = 0
-    for key in data.files:
-        eeg = data[key]  # shape=(16,80)
-        print(eeg)
-        print(eeg.shape)
-
-        a += 1
-        if a == 4:
-            break
-
-
+    # # 验证分割结果是否正确
+    # # 注意:在一个实验者中,R01和R02时长为1min,其余均为2min,故函数切割的调用需注意
+    # edf_file = "./16_channels/S001/S001R01.edf"
+    # data_seg, channels = segment_edf_one_eeg(edf_file)
+    #
+    # npz_file = "./16_channels_seg/S001R01.npz"
+    # data = np.load(npz_file)
+    # features = []
+    # a = 0
+    # for key in data.files:
+    #     eeg = data[key]  # shape=(16,80)
+    #     print(eeg)
+    #     print(eeg.shape)
+    #
+    #     a += 1
+    #     if a == 4:
+    #         break
+    #
     # a = 0
     # npz_file= "./16_channels_seg/S001R01.npz"
     # data = np.load(npz_file)
@@ -526,17 +520,12 @@ if __name__ == "__main__":
     #     a += 1
     #     if a == 4:
     #         break
-
-
+    #
     # # 保存为npz文件示例
     # save_dir = r"seg_Data/example"
     #
     # for i, segment in enumerate(data_seg):
     #     np.savez(os.path.join(save_dir, "S001R01.npz"), *data_seg)
-
-
-
-
 
     """
     专门处理两个无法分割的文件S106R05.edf和S104R08.edf
@@ -556,33 +545,29 @@ if __name__ == "__main__":
     # except Exception as e:
     #     print(f"处理失败 {edf_path}: {str(e)}")
 
-
     """
         5.查看npz文件数据
     """
-
-
-
-    data_dir = "16_channels_seg"
-    npz_files = [f for f in os.listdir(data_dir) if f.endswith('.npz')]
-
-
-    num = 0
-    # 加载所有NPZ文件数据
-    X, y = [], []
-    for file in npz_files:
-        data = np.load(os.path.join(data_dir, file))
-        if num == 5:
-            break
-        for key in data.files:
-            X.append(data[key].shape)# 添加通道维度
-            y.append(file.split('S')[1].split('R')[0])  # 从文件名提取标签
-            num = num+1
-            if num ==5:
-                break
-
-        data.close()
-
-
-    print(X[1])
-    print(y)
+    # data_dir = "16_channels_seg"
+    # npz_files = [f for f in os.listdir(data_dir) if f.endswith('.npz')]
+    #
+    #
+    # num = 0
+    # # 加载所有NPZ文件数据
+    # X, y = [], []
+    # for file in npz_files:
+    #     data = np.load(os.path.join(data_dir, file))
+    #     if num == 5:
+    #         break
+    #     for key in data.files:
+    #         X.append(data[key].shape)# 添加通道维度
+    #         y.append(file.split('S')[1].split('R')[0])  # 从文件名提取标签
+    #         num = num+1
+    #         if num ==5:
+    #             break
+    #
+    #     data.close()
+    #
+    #
+    # print(X[1])
+    # print(y)
