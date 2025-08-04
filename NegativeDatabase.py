@@ -3,21 +3,16 @@ from typing import Tuple
 import numpy as np
 
 """
-    此文件实现了负数据库,阈值设定为0.32,输入的特征二进制编码与数据库中的对比数字小于这个数字便认为属于同一个人
-"""
+    此文件实现了负数据库,输入的特征二进制编码与数据库中的对比
+    按照PREDICTION 与 R 参数配置还原然后将其输入到模型中判断是否是同一个人
 
-
-
-
-"""
-注意!!!
-关于 PREDICTION 与 R 参数的配置关乎系统识别的准确率
+    注意!!!
+    关于 PREDICTION 与 R 参数的配置关乎系统识别的准确率
 """
 # 系统参数配置
 PREDICTION = [0.9, 0.05, 0.05]  # 负数据生成概率分布
 R = 45                        # 负数据库规模参数
 EEG_SIGNAL_LENGTH = 2048      # 脑电特征数据二进制编码长度
-SIMILARITY_THRESHOLD = 0.32   # 相似度阈值
 CN = 2048 * R + 0.5
 
 
@@ -91,6 +86,8 @@ class EEGNegativeDatabase:
     def create_negative_string(self, eeg_feature, r=R):
         """
         将脑电数据的2048位二进制编码转换为不可逆的统计形式,即负数据库形式
+
+        此处为字符串
 
         :param eeg_feature: 原始脑电信号的二进制字符串
         :param r: 负数据库规模参数（控制生成多少条负数据）
@@ -214,10 +211,10 @@ class EEGNegativeDatabase:
         bit_probs = []
 
         for n0, n1 in zip(zero_cnt, one_cnt):
-            # 论文公式(2.3)计算P_diff
+            # 计算P_diff
             P_diff = (sum(p * i for p, i in zip(PREDICTION, range(1, 4))) / 3)
 
-            # 论文公式(2.4)贝叶斯估计
+            # 贝叶斯估计
             numerator = (P_diff ** n1) * ((1 - P_diff) ** n0)
             denominator = numerator + (P_diff ** n0) * ((1 - P_diff) ** n1)
 

@@ -2,8 +2,9 @@ import numpy as np
 import torch
 from DATABASE import load_model
 from sklearn.metrics import confusion_matrix, classification_report, precision_score, recall_score, f1_score
-from DATABASE_DCNN import EEGAuthSystem_DCNN, preprocess_data,load_model_DCNN
+from DATABASE_DCNN import EEGAuthSystem_DCNN,load_model_DCNN
 import torch.nn.functional as F
+from DATABASE import preprocess_data
 
 """ 
     该py文件为DATABASE_DCNN.py文件中主函数的推广,本质上是验证的重复性实验,可以不管
@@ -28,7 +29,7 @@ def predict(model, device, eeg_data):
 # 常量定义（使用大写命名）
 NUM_SAMPLES = 20  # 样本个数
 SUBJECT_RANGE = (1, 110)  # S编号范围
-RECORD_RANGE = (3, 15)  # R编号范围
+RECORD_RANGE = (1, 15)  # R编号范围
 ARR_INDEX_RANGE = (0, 240)  # arr_索引范围
 DATA_DIR = "16_channels_seg"
 
